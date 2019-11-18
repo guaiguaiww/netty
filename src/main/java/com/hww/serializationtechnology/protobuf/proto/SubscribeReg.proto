@@ -1,0 +1,14 @@
+syntax = "proto2";
+package com.hww.protobuf.code;
+option java_package = "com.hww.serializationtechnology.protobuf.code";
+option java_outer_classname = "SubscribeRegProto";
+
+message SubscribeReg{
+ required int32 subRegId = 1;
+ required string userName = 2;
+ required string productName = 3;
+ repeated string address = 4;
+}
+
+
+

@@ -1,0 +1,306 @@
+javaIO的演进
+
+一.传统的Bio编程：
+    1.说明：网络编程的基本模型是Client/Server模型，也就是俩个进程之间的相互通信。
+         其中服务端提供位置信息(绑定的ip地址和监听的端口)，客户端通过连接操作向服务端监听的地址发起连接，
+         经历三次握手，成功建立连接，就可以通过socket套接字进行通信。
+    2.模型：采用Bio通信模型的服务端，通常是有一个独立的Acceptor线程负责监听客户端的连接，
+         他一旦接收到客户端的连接请求之后就会为每个客户端创建一个新的线程进行链路处理，
+         处理完成之后通过输出流应答给客户端，然后销毁线程，也就是典型的一请求一应答通信模型。
+    3.代码：
+    3.1客户端：
+      public class TimeClient {
+          private static Logger logger = Logger.getLogger(TimeClient.class);
+          public static void main(String[] args) {
+              int port = 8080;
+              if (args != null && args.length > 0) {
+                  port = Integer.parseInt(args[0]);
+              }
+              Socket socket = null;
+              BufferedReader in = null;
+              PrintWriter out = null;
+              try {
+                  socket = new Socket("127.0.0.1", port);
+                  //使用socket建立输入输出流
+                  in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                  out = new PrintWriter(socket.getOutputStream(), true);
+                  //向服务端写入数据
+                  out.println("QUERY TIME ORDER");
+                  logger.info("Send order to server successed");
+                  String response = in.readLine();
+                  logger.info("the client has received message form server is " + response);
+              } catch (Exception e) {
+
+              } finally {
+                  if (in != null) {
+                      try {
+                          in.close();
+                          in=null;
+                      } catch (IOException e) {
+                          e.printStackTrace();
+                      }
+                  }
+                  if (socket!=null){
+                      try {
+                          socket.close();
+                          socket=null;
+                      } catch (IOException e) {
+                          e.printStackTrace();
+                      }
+                  }
+              }
+          }
+      }
+    3.2服务端：
+    public class TimeServer {
+        private static Logger logger = Logger.getLogger(TimeServer.class);
+        public static void main(String[] args) throws Exception {
+            int port = 8080;
+            if (args != null && args.length > 0) {
+                port = Integer.valueOf(args[0]);
+            }
+            ServerSocket serverSocket = null;
+            try {
+                serverSocket = new ServerSocket(port);
+                logger.info("the server has started in " + port);
+                Socket socket = null;
+                //创建线程池
+                while (true) {
+                    //如果没有客户端建立连接，服务端(主线程)会一直阻塞在这里serverSocket.accept()
+                    socket = serverSocket.accept();
+                    //针对每一个socket开启一个线程去处理
+                    new Thread(new TimeServerHandler(socket)).start();
+                }
+            } finally {
+                if (serverSocket != null) {
+                    serverSocket.close();
+                    serverSocket = null;
+                }
+            }
+        }
+    }
+    3.3处理Handler:
+    public class TimeServerHandler implements Runnable {
+        private Logger logger = Logger.getLogger(TimeServerHandler.class);
+        private Socket socket;
+        public TimeServerHandler(Socket socket) {
+            this.socket = socket;
+        }
+        @Override
+        public void run() {
+            BufferedReader in = null;
+            PrintWriter out = null;
+            try {
+                in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
+                out = new PrintWriter(this.socket.getOutputStream(), true);
+                String currentTime = null;
+                String body = null;
+                while (true) {
+                    body = in.readLine();
+                    if (body == null) {
+                        break;
+                    }
+                    logger.info(" the server has received order is " + body);
+                    currentTime = "QUERY TIME ORDER".equalsIgnoreCase(body) ? new Date(System.currentTimeMillis()).toString() : "BAD ORDER";
+                    out.println(currentTime);
+                }
+            } catch (Exception e) {
+                if (in != null) {
+                    try {
+                        in.close();
+                    } catch (IOException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+                if (out != null) {
+                    out.close();
+                    out = null;
+                }
+                if (this.socket != null) {
+                    try {
+                        this.socket.close();
+                        this.socket = null;
+                    } catch (IOException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
+    3.4问题：该模型最大的问题就是缺乏弹性伸缩能力，当容户端并发增加后，服务端创建的线程个数和客户端并发访问数呈1: 1的正比关系，
+         由于线程是Java虚拟机作常宝贵的系统资源，当线程数膨胀之后，系统的性能将急剧下降，
+         随着并发访问量的继续增大，系统会发生线程堆栈溢出、创违新线程失败等问题，最终导致进程宕机或者僵死，不能对外提供服务。
+         每当有一个新的客户端请求接入时，服务端必须创建一个新的线程处理新接入的客户端，
+         一个线程只能处理一个客户端连接，在高性能的服务器应用领域，往往需要面对成千上万个客户端的并发连接，这种模型显然无法满足高性能，高并发接入的场景。
+ 二.伪异步IO编程
+    1.说明：为了改进传统的Bio编程模型中遇见的问题，出现了通过线程池或者消息队列实现一个或多个线程处理N个客户端的模型，底层通信机制依然是同步阻塞io
+    2.模型：当有新的客户端接入时，将客户端的socket封装成为一个Task(实现Runable接口的线程)然后投递到后端的线程池中去处理。
+         由于线程池可以设置消息队列的大小和最大线程数，因此，他的资源是可控的，无论多少个客户端的并发访问，都不会导致资源的耗尽和宕机。
+    3.代码：
+    3.1客户端同上。
+    3.2服务端：
+    public class TimeServer {
+        private static Logger logger = Logger.getLogger(TimeServer.class);
+        public static void main(String[] args) throws Exception {
+            int port = 8080;
+            if (args != null && args.length > 0) {
+                port = Integer.valueOf(args[0]);
+            }
+            ServerSocket serverSocket = null;
+            try {
+                serverSocket = new ServerSocket(port);
+                logger.info("the server has started in " + port);
+                Socket socket = null;
+                //创建线程池
+                TimeServerHandlerExecutePool executePool = new TimeServerHandlerExecutePool(50, 10000);
+                while (true) {
+                    socket = serverSocket.accept();
+                    //将socket封装成为一个task,使用线程池去处理
+                    executePool.execute(new TimeServerHandler(socket));
+                }
+            } finally {
+                if (serverSocket != null) {
+                    serverSocket.close();
+                    serverSocket = null;
+                }
+            }
+        }
+    }
+    3.3封装的线程池：
+    public class TimeServerHandlerExecutePool {
+        private ExecutorService executorService;
+        public TimeServerHandlerExecutePool(int maxPoolSize, int queueSize) {
+            /**
+             * corePoolSize:Java虚拟机可用的处理器数量,保留在线程池中的线程数量
+             * maximumPoolSize: 线程池中允许的最大线程数
+             * keepAliveTime：就是非核心线程可以保留的最长的空闲时间
+             * TimeUnit：计算这个时间的一个单位
+             * BlockingQueue<Runnable>：等待队列，任务可以储存在任务队列中等待被执行，执行的是FIFIO原则
+             */
+            executorService = new ThreadPoolExecutor(Runtime.getRuntime().availableProcessors(), maxPoolSize, 120L, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(queueSize));
+        }
+        public void execute(Runnable task) {
+            executorService.execute(task);
+        }
+    }
+
+    3.4处理Handler：
+    public class TimeServerHandler implements Runnable {
+        private Logger logger = Logger.getLogger(TimeServerHandler.class);
+        private Socket socket;
+        public TimeServerHandler(Socket socket) {
+            this.socket = socket;
+        }
+        @Override
+        public void run() {
+            BufferedReader in = null;
+            PrintWriter out = null;
+            try {
+                /**
+                 *  InputStream inputStream = socket.getInputStream();
+                 *  //This method blocks until input data is available, the end of the stream is detected, or an exception is thrown
+                 *  public int read(byte b[], int off, int len);
+                 */
+                in = new BufferedReader(new InputStreamReader(this.socket.getInputStream()));
+                out = new PrintWriter(this.socket.getOutputStream(), true);
+                String currentTime = null;
+                String body = null;
+                while (true) {
+                    body = in.readLine();
+                    if (body == null) {
+                        break;
+                    }
+                    logger.info(" the server has received order is " + body);
+                    currentTime = "QUERY TIME ORDER".equalsIgnoreCase(body) ? new Date(System.currentTimeMillis()).toString() : "BAD ORDER";
+                    out.println(currentTime);
+                }
+            } catch (Exception e) {
+                if (in != null) {
+                    try {
+                        in.close();
+                    } catch (IOException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+                if (out != null) {
+                    out.close();
+                    out = null;
+                }
+                if (this.socket != null) {
+                    try {
+                        this.socket.close();
+                        this.socket = null;
+                    } catch (IOException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+            }
+        }
+    }
+    3.5问题分析：首先对java的俩个InputStream和OutputStream同步流进行分析：
+       通信模型：发送方(OutputStream)[缓冲区]=========================[缓冲区](InputStream)接收方
+     3.5.1.InputStream：
+     public int read(byte b[], int off, int len) throws IOException;
+     ---This method blocks until input data is available, end of file is detected, or an exception is thrown---
+     当使用InputStream输入流进行读取数据的时候，他会一直阻塞下去，直到如下三种事件：
+     ①.有数据可读
+     ②.可用数据已经读取完毕。
+     ③.发送异常。
+     问题：这意味着当对方发送请求或应答消息比较缓慢，或者网络传输较慢时，读取输入流一方的通信线程将被长时间阻寒，
+           如果对方要60s才能够将数据发送究成，读取一方的I/O 线程也将会被同步阻寒60s,在此期间，其他接入的线程只能在消息队列中排队。
+
+     3.5.2.OutputStream：
+     public void write(byte b[]) throws IOException;
+     --- Writes an array of bytes. this method blocks until the bytes are actually written ---
+     当使用OutputStream输出流进行写入数据的时候,线程也会阻塞,直到所有要发送的字节全部写入完毕,或者发生异常。
+     学习过TCP/IP相关知识后直到,当消息的接收方处理数据缓慢的时候,将不能及时的从tcp的缓冲区读取数据，将会导致发送方的tcp的window size不断减小，直到为0,
+     此时，双方都处于Keep-Alive状态，消息发送方将不再向tcp的缓存区写入数据，write操作将会被无限期阻塞，直到window size 大于0 或者发送io异常。
+
+    3.6 Bio同步阻塞io的总结：
+    1.采用伪异步I/O的线程正在读取有故障服务节点的数据，由于输入流是阻塞的，它将会被阻塞。
+    2.由于线程池采用阻塞队列实现，当队列积满之后，后续入队列的操作将被阻塞。
+    3.客户端会发送大量的连接超时。
+三、NIO(Non-block-Io)--多路复用器
+   1.相关概念：
+     ①缓冲区-Buffer:是一个对象，包含一些要写入|读出的数据。传统的io是将数据写入stream中，nio是将数据写入Buffer中。
+                    在NIO库中，所有的数据都是用缓冲区处理的，读取数据时是直接到缓冲区当中的，写入数据时，写入到缓冲区，任何时候访问NIO中的数据，都要通过Buffer来操作。
+                    实质上是一个数组，但不仅仅是一个数组，同时提供了对数据的结构化访问，以及维护读写位置的信息。
+     ②通道-Channel:Channel与流的不同之处在于，Channel是双向的，可用于读写，或者二者同时进行。
+     Channel可以分为俩类：用于网络读写的SelectableChannel(ServerSocketChannel,socketChannel) 和用于文件操作的FileChannel.
+     ③selector--多路复用器，selector会不断地轮询注册在其上的channel,如果某个Channel上面发生读或者写事件，这个channel就处于就绪的状态，会被selector轮询出来，然后通过SelectionKey就可以获取Channel的集合,进行后续的I/O操作
+
+
+四、http协议的弊端
+  1.http协议为半双工协议，半双工协议是指数据可以再通信的双方互相传递，但是不能同时传。
+    意味着，在某一时刻，只有一个方向上的数据传递。
+  2.http消息冗长而繁琐，http消息包含请求行，消息体，消息头。通常情况下采用文本方式传输，
+   相比于其他的二进制通信协议,冗长而繁琐。
+  3.消息推送存在问题。
+五、WebSocket是html5提供的一种客户端与服务端进行全双工通信的网络技术
+    客户端和服务端只需要做一个握手的动作，然后服务器和客户端之间就形成了一条快速通道，俩者就可以互相传送数据了。
+    WebSocket基于TCP双向全双工进行消息传递，在同一时刻既可以发送消息，也可以接受消息
+六、私有协议栈
+    1.分布式项目各节点通信的方式：
+        ①利用标准的公有协议进行跨节点服务调用，列如Http+Xml ,Restful+JSon 或者WebService。
+        ②通过Java的Socket+java序列化的方式进行跨节点调用。
+        ③利用开源的rpc框架进行远程服务调用，比如Protobuf,Dubbo,Thrift。
+        ④通过rmi进行远程服务调用。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
