@@ -37,6 +37,9 @@
       </list>
     </option>
   </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
   <component name="MavenImportPreferences">
     <option name="generalSettings">
       <MavenGeneralSettings>
@@ -51,6 +54,7 @@
     </option>
   </component>
   <component name="ProjectId" id="1SzpLBuCBqBYnINJEmNAsiemNPD" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
   <component name="PropertiesComponent">
     <property name="MyBatisLogPluginparameters" value="Parameters:" />
     <property name="MyBatisLogPluginpreparing" value="Preparing:" />
@@ -254,7 +258,7 @@
       <workItem from="1574037942441" duration="19000" />
       <workItem from="1574044267884" duration="204000" />
       <workItem from="1574044539404" duration="32000" />
-      <workItem from="1574044966995" duration="8854000" />
+      <workItem from="1574044966995" duration="9577000" />
     </task>
     <servers />
   </component>
@@ -270,5 +274,16 @@
     <default_view_options>
       <options category_option="false" module_option="true" model_option="true" root_option="true" path_option="false" count_option="true" info_option="true" view_searched_nodes_option="true" group_searched_nodes_option="true" autoscroll_option="false" />
     </default_view_options>
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
 </project>
